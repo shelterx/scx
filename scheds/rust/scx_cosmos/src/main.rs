@@ -406,6 +406,16 @@ struct Opts {
     #[clap(long, action = clap::ArgAction::SetTrue)]
     no_tick_preempt: bool,
 
+    /// Respect nice levels for latency-sensitive boost.
+    ///
+    /// When enabled, tasks with nice >= 5 do not receive the latency-sensitive scheduling boost
+    /// from exec_vruntime. This ensures low-priority tasks cannot bypass their nice-based priority
+    /// even if they exhibit latency-sensitive behavior (frequent sleep/wake cycles).
+    ///
+    /// By default (without this flag), all tasks can receive the latency boost regardless of nice.
+    #[clap(short = 'R', long, action = clap::ArgAction::SetTrue)]
+    respect_nice: bool,
+
     /// Enable address space affinity.
     ///
     /// This option allows to keep tasks that share the same address space (e.g., threads of the
@@ -820,6 +830,7 @@ impl<'a> Scheduler<'a> {
         rodata.avoid_smt = opts.avoid_smt;
         rodata.no_early_clear = opts.no_early_clear;
         rodata.tick_preempt = !opts.no_tick_preempt;
+        rodata.respect_nice = opts.respect_nice;
         rodata.mm_affinity = opts.mm_affinity;
 
         // Enable perf event scheduling settings.

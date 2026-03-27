@@ -144,6 +144,12 @@ const volatile bool tick_preempt = true;
 const volatile bool no_wake_sync;
 
 /*
+ * Respect nice levels for latency-sensitive boost.
+ * When true, tasks with nice >= 5 do not get exec_vruntime boost.
+ */
+const volatile bool respect_nice = false;
+
+/*
  * Disable early clearing of idle CPU state.
  */
 const volatile bool no_early_clear;
@@ -935,6 +941,10 @@ static u64 task_slice(const struct task_struct *p)
  * frequency: tasks that sleep often have a bigger slice lag, allowing them
  * to accumulate more time-slice credit than tasks with infrequent, long
  * sleeps.
+ *
+ * When respect_nice is enabled, tasks with nice >= 5 (static_prio >= 125)
+ * do not receive the exec_vruntime boost, ensuring they respect their
+ * nice-based priority.
  */
 static u64 task_dl(struct task_struct *p, struct task_ctx *tctx)
 {
@@ -944,6 +954,13 @@ static u64 task_dl(struct task_struct *p, struct task_ctx *tctx)
 
 	if (time_before(p->scx.dsq_vtime, vtime_min))
 		p->scx.dsq_vtime = vtime_min;
+
+	/*
+	 * If respect_nice is enabled and task has nice >= 5, skip the
+	 * exec_vruntime boost (latency-sensitive path).
+	 */
+	if (respect_nice && p->static_prio >= 125)
+		return p->scx.dsq_vtime;
 
 	return p->scx.dsq_vtime + scale_by_task_weight_inverse(p, tctx->exec_runtime);
 }
