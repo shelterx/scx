@@ -607,20 +607,43 @@ static s32 smt_sibling(s32 cpu)
  * If SMT is disabled or SMT contention avoidance is disabled, always
  * return false (since there's no SMT contention or it's ignored).
  */
+static inline bool is_cpu_idle(s32 cpu)
+{
+	struct task_struct *p;
+
+	p = __COMPAT_scx_bpf_cpu_curr(cpu);
+
+	return p ? p->flags & PF_IDLE : false;
+}
+
 static bool is_smt_contended(s32 cpu)
 {
 	const struct cpumask *idle_mask;
 	bool is_contended;
+	s32 sibling;
 
 	if (!smt_enabled)
 		return false;
 
+	sibling = smt_sibling(cpu);
+	if (sibling < 0 || sibling >= nr_cpu_ids)
+		return false;
+
 	/*
-	 * If the sibling SMT CPU is not idle and there are other full-idle
-	 * SMT cores available, consider the current CPU as contended.
+	 * FAST PATH: If sibling is idle, there is no SMT contention.
+	 * This avoids the expensive kernel call in the common case.
+	 */
+	if (is_cpu_idle(sibling))
+		return false;
+
+	/*
+	 * SLOW PATH: Sibling is busy. Check if other CPUs are idle.
+	 * We must check both that sibling is NOT in idle_mask AND that
+	 * there exist other idle CPUs, to avoid false positives when
+	 * sibling becomes idle between is_cpu_idle() and get_idle_cpumask().
 	 */
 	idle_mask = scx_bpf_get_idle_cpumask();
-	is_contended = !bpf_cpumask_test_cpu(smt_sibling(cpu), idle_mask) &&
+	is_contended = !bpf_cpumask_test_cpu(sibling, idle_mask) &&
 		       !bpf_cpumask_empty(idle_mask);
 	scx_bpf_put_cpumask(idle_mask);
 
@@ -681,15 +704,6 @@ static inline bool is_primary_cpu(s32 cpu)
 		return true;
 
 	return mask && bpf_cpumask_test_cpu(cpu, mask);
-}
-
-static inline bool is_cpu_idle(s32 cpu)
-{
-	struct task_struct *p;
-
-	p = __COMPAT_scx_bpf_cpu_curr(cpu);
-
-	return p ? p->flags & PF_IDLE : false;
 }
 
 /*
